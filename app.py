@@ -1,17 +1,18 @@
 import io
-import tempfile
-from pathlib import Path
+import base64
 
 import streamlit as st
-from pixels2svg import pixels2svg
 from PIL import Image
 
 st.set_page_config(page_title="Image to SVG/EPS Converter", page_icon="🖼️")
 
 st.title("Image → SVG / EPS Converter")
+
 st.write(
-    "Upload a PNG or JPG image and this app will try to convert it into vector SVG, "
-    "and also give you an EPS version."
+    "Upload a PNG or JPG image and this app will convert it to SVG and EPS files.\n\n"
+    "- The **SVG** contains your image embedded inside an SVG container.\n"
+    "- The **EPS** is a bitmap EPS created with Pillow.\n\n"
+    "Both work well for many design and print workflows."
 )
 
 uploaded_file = st.file_uploader(
@@ -19,88 +20,61 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    # Open image with Pillow so we can reuse it later
-    image = Image.open(uploaded_file).convert("RGBA")
-
+    # Open image with Pillow
+    image = Image.open(uploaded_file)
     st.subheader("Original image")
     st.image(image, use_column_width=True)
 
-    st.subheader("Conversion options")
-    color_tolerance = st.slider(
-        "Color tolerance (merge similar colors)",
-        min_value=1,
-        max_value=50,
-        value=5,
-        help=(
-            "Higher values merge more similar colors into single shapes. "
-            "If the result looks too blocky, try a lower value."
-        ),
-    )
-    remove_background = st.checkbox(
-        "Try to remove solid background",
-        value=False,
-        help="Useful if your image has a flat background color.",
-    )
-
     if st.button("Convert to SVG & EPS"):
-        with st.spinner("Converting… this may take a few seconds for large images"):
+        with st.spinner("Converting…"):
+            # ---- 1) Ensure image is in a standard mode ----
+            # Use RGBA for SVG/PNG; RGB for EPS (no alpha)
+            image_rgba = image.convert("RGBA")
+            image_rgb = image.convert("RGB")
+            width, height = image_rgba.size
 
-            # ---- 1) Save the image to a temp PNG for pixels2svg ----
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_in:
-                image.save(tmp_in, format="PNG")
-                input_path = tmp_in.name
+            # ---- 2) Build SVG with embedded PNG (base64) ----
+            png_buffer = io.BytesIO()
+            image_rgba.save(png_buffer, format="PNG")
+            png_bytes = png_buffer.getvalue()
+            png_b64 = base64.b64encode(png_bytes).decode("ascii")
 
-            tmp_svg_path = input_path + ".svg"
+            svg_str = f'''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="{width}" height="{height}"
+     viewBox="0 0 {width} {height}">
+  <image href="data:image/png;base64,{png_b64}"
+         width="{width}" height="{height}" />
+</svg>
+'''
+            svg_bytes = svg_str.encode("utf-8")
 
-            # ---- 2) Create SVG using pixels2svg (vector) ----
-            try:
-                pixels2svg(
-                    input_path,
-                    tmp_svg_path,
-                    color_tolerance=color_tolerance,
-                    remove_background=remove_background,
-                )
-            except Exception as e:
-                st.error(f"SVG conversion failed: {e}")
-                st.stop()
-
-            svg_bytes = Path(tmp_svg_path).read_bytes()
-
-            # ---- 3) Create EPS using Pillow (bitmap inside EPS) ----
+            # ---- 3) Create EPS using Pillow ----
             eps_buffer = io.BytesIO()
-            try:
-                # EPS does not support transparency → convert to RGB
-                image_rgb = image.convert("RGB")
-                image_rgb.save(eps_buffer, format="EPS")
-                eps_bytes = eps_buffer.getvalue()
-            except Exception as e:
-                st.warning(
-                    f"Could not create EPS file: {e}. "
-                    "You can still download the SVG."
-                )
-                eps_bytes = None
+            image_rgb.save(eps_buffer, format="EPS")
+            eps_bytes = eps_buffer.getvalue()
 
         st.success("Conversion complete!")
 
         st.subheader("Download your files")
 
         st.download_button(
-            "⬇️ Download SVG (vector)",
+            "⬇️ Download SVG",
             data=svg_bytes,
-            file_name="vectorized.svg",
+            file_name="image.svg",
             mime="image/svg+xml",
         )
 
-        if eps_bytes is not None:
-            st.download_button(
-                "⬇️ Download EPS",
-                data=eps_bytes,
-                file_name="image.eps",
-                mime="application/postscript",
-            )
+        st.download_button(
+            "⬇️ Download EPS",
+            data=eps_bytes,
+            file_name="image.eps",
+            mime="application/postscript",
+        )
 
         st.caption(
-            "Note: SVG is a true vector file (best for editing). "
-            "The EPS provided here is a bitmap wrapped in an EPS container, "
-            "which many print / design programs accept."
+            "Note: These are **bitmap-based** SVG/EPS files. "
+            "They scale well for many uses, but they are not hand-drawn vector paths. "
+            "If you want true vectorization for simple logos only, we can add a separate "
+            "‘experimental vector mode’ later."
         )
