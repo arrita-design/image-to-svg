@@ -1,3 +1,2 @@
 streamlit
-pixels2svg
 Pillow
