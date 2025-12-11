@@ -1,18 +1,17 @@
-import io
 import base64
+import io
 
 import streamlit as st
-from PIL import Image
 
-st.set_page_config(page_title="Image to SVG/EPS Converter", page_icon="🖼️")
+st.set_page_config(page_title="Image to SVG Converter", page_icon="🖼️")
 
-st.title("Image → SVG / EPS Converter")
+st.title("Image → SVG Converter")
 
 st.write(
-    "Upload a PNG or JPG image and this app will convert it to SVG and EPS files.\n\n"
-    "- The **SVG** contains your image embedded inside an SVG container.\n"
-    "- The **EPS** is a bitmap EPS created with Pillow.\n\n"
-    "Both work well for many design and print workflows."
+    "Upload a PNG or JPG image and this app will put it inside an SVG file so "
+    "you can download it.\n\n"
+    "Note: This is a **bitmap embedded in SVG**, not hand-drawn vector paths, "
+    "so it keeps the original look of photos and artwork."
 )
 
 uploaded_file = st.file_uploader(
@@ -20,43 +19,32 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    # Open image with Pillow
-    image = Image.open(uploaded_file)
+    # Show preview
     st.subheader("Original image")
-    st.image(image, use_column_width=True)
+    st.image(uploaded_file, use_column_width=True)
 
-    if st.button("Convert to SVG & EPS"):
+    if st.button("Convert to SVG"):
         with st.spinner("Converting…"):
-            # ---- 1) Ensure image is in a standard mode ----
-            # Use RGBA for SVG/PNG; RGB for EPS (no alpha)
-            image_rgba = image.convert("RGBA")
-            image_rgb = image.convert("RGB")
-            width, height = image_rgba.size
+            # Read the raw bytes of the uploaded file
+            img_bytes = uploaded_file.read()
 
-            # ---- 2) Build SVG with embedded PNG (base64) ----
-            png_buffer = io.BytesIO()
-            image_rgba.save(png_buffer, format="PNG")
-            png_bytes = png_buffer.getvalue()
-            png_b64 = base64.b64encode(png_bytes).decode("ascii")
+            # Guess mime type from upload (e.g. image/png, image/jpeg)
+            mime = uploaded_file.type or "image/png"
+
+            # NOTE: We don't know the exact pixel width/height without Pillow,
+            # so we use 100% width and height. Programs will size it to fit.
+            b64 = base64.b64encode(img_bytes).decode("ascii")
 
             svg_str = f'''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="{width}" height="{height}"
-     viewBox="0 0 {width} {height}">
-  <image href="data:image/png;base64,{png_b64}"
-         width="{width}" height="{height}" />
+     width="100%" height="100%">
+  <image href="data:{mime};base64,{b64}"
+         width="100%" height="100%" />
 </svg>
 '''
             svg_bytes = svg_str.encode("utf-8")
 
-            # ---- 3) Create EPS using Pillow ----
-            eps_buffer = io.BytesIO()
-            image_rgb.save(eps_buffer, format="EPS")
-            eps_bytes = eps_buffer.getvalue()
-
         st.success("Conversion complete!")
-
-        st.subheader("Download your files")
 
         st.download_button(
             "⬇️ Download SVG",
@@ -65,16 +53,8 @@ if uploaded_file is not None:
             mime="image/svg+xml",
         )
 
-        st.download_button(
-            "⬇️ Download EPS",
-            data=eps_bytes,
-            file_name="image.eps",
-            mime="application/postscript",
-        )
-
         st.caption(
-            "Note: These are **bitmap-based** SVG/EPS files. "
-            "They scale well for many uses, but they are not hand-drawn vector paths. "
-            "If you want true vectorization for simple logos only, we can add a separate "
-            "‘experimental vector mode’ later."
+            "This SVG keeps your original image as-is, which works well for complex "
+            "photos and artwork. For true vector tracing of simple logos only, we can "
+            "add a separate experimental mode later."
         )
